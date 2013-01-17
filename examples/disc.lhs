@@ -2,6 +2,8 @@
 
 > import Network.Heartbeat
 > import Data.Time.Clock
+> import Data.ByteString.Char8 as S8
+> import Control.Concurrent.STM
 
 We have 2 approaches for service discovery:
 
@@ -32,13 +34,11 @@ We can add a client in such network and listen for servers:
 We may want to send additional data e.g. a number of connections
 so client can decide what server we want to use
 
-> -- example2  name bast port = do
-> --   box <- newTVarIO 0
-> --   let nameNum = atomically (readTVar box) >>= \x -> return (name ++ "/" ++ show x)
-> --   r <- discoveryServer (OneWay (secondsToDiffTime 1) Nothing (nameNum))
-> --                  bcast
-> --                  port
-> --   return (box, r)
+> example2 box name bcast port = do
+>    let nameNum = atomically (readTVar box) >>= \x -> return (S8.concat [name,"/",pack (show x)])
+>    discoveryServer (OneWay (secondsToDiffTime 1) (nameNum))
+>                   bcast
+>                   port
 
 Now we have a box that we may want to update and so an updated 
 information will be broadcasted over the network.
