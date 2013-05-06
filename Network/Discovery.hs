@@ -47,10 +47,9 @@ import Network.Socket.ByteString
 import Control.Applicative
 import Control.Concurrent
 import Control.Exception
-import Control.Monad (forever)
+import Control.Monad (forever, replicateM_)
 
 import System.Time.Monotonic
-
 
 data DiscoverySignal = DiscoveryStop
                     deriving (Show, Typeable)
@@ -66,7 +65,7 @@ data Discovery = OneWay {
                     disInterval :: DiffTime,            -- ^ ping interval
                     disData :: IO ByteString            -- ^ data to send
                  }
-               | RepRep {
+               | ReqRep {
                    disData :: IO ByteString
                 }
 
@@ -80,6 +79,7 @@ discoveryServer :: Discovery                              -- ^ discovery algorit
                 -> IO ()
 discoveryServer (OneWay interval dat_) bcast port = onSocket bcast port $
                \a s -> oneWayServer dat_ interval s a
+discoveryServer _ _ _ = error  "not yet implemented"
 
 -- | Higher level wrapper for client server application
 discovery ::  Discovery                                   -- ^ discoverty
@@ -91,7 +91,7 @@ discovery (OneWay interval dat_) event bcast port = onSocket bcast port $
                \a s -> bracket (forkIO $ oneWayServer dat_ interval s a)
                                (killThread)
                                (const . forever $ recvFrom s 1024 >>= uncurry event)
-               
+discovery (ReqRep dat_) event bcast port = reqRepServer dat_ bcast port event 
 
 -- | Searches for server for the given amount of time
 lookupServerT :: (Eq a) => DiscoveryClient a              -- ^ discovery client
@@ -113,6 +113,35 @@ oneWayServer :: (IO ByteString) -> DiffTime -> Socket -> SockAddr -> IO ()
 oneWayServer getData interval sock addr = forever $  
     getData >>= \d -> sendTo sock d addr >> delay interval
 
+
+reqRepServer :: (IO ByteString) -> DiscoveryHost -> Int -> (ByteString -> SockAddr -> IO ()) -> IO ()
+reqRepServer getData bcast port event = do
+    _ <- forkIO $ onSocket bcast port $ \addr sock -> do
+        _ <- forkIO $ replicateM_  10 (getData >>= \d -> sendTo sock d addr >> delay 2)
+        forever $ recvFrom sock 1024 >>= \(data_,addr') -> do 
+           event data_ addr'
+           bracket (do socket AF_INET Stream defaultProtocol)
+                   (sClose) 
+                   (\s -> do connect s addr'
+                             sendAll s =<< getData
+                   )
+    bracket (do sock <- socket AF_INET Stream defaultProtocol
+                return sock)
+            (sClose) 
+            (\s -> do listen s 1 
+                      sockHandler s
+            )
+  where 
+    sockHandler sock = do
+      (s, _) <- accept sock -- FIXMENOW 2nd 3rd param
+      _ <- forkIO $ communicate s 
+      sockHandler sock
+    communicate s = do
+      (data_, addr) <- recvFrom s 1024
+      event data_ addr
+
+      
+            
 
 -- | run one way client
 oneWayClient :: Eq a 
