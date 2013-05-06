@@ -91,20 +91,21 @@ discovery (OneWay interval dat_) event bcast port = onSocket bcast port $
                \a s -> bracket (forkIO $ oneWayServer dat_ interval s a)
                                (killThread)
                                (\_ -> 
-                                  let go Nothing = do
-                                            (a,b) <- recvFrom s 1024 
-                                            event a b
-                                            _ <- sendTo s a b
+                                  let l = SockAddrInet (fromIntegral port) (16777343 {- 127.0.0.1 -})
+                                      go Nothing = do
+                                            (a',b) <- recvFrom s 1024 
+                                            event a' b
+                                            _ <- sendTo s a' l
                                             threadDelay 100
-                                            go (Just a)
+                                            go (Just a')
                                       go (Just x) = do
-                                            (a,b) <- recvFrom s 1024
-                                            if x == a
+                                            (a',b) <- recvFrom s 1024
+                                            if x == a'
                                                 then go Nothing
                                                 else do
-                                                  event a b
-                                                  _ <- sendTo s a b
-                                                  go (Just a)
+                                                  event a' b
+                                                  _ <- sendTo s a' l
+                                                  go (Just a')
                                   in go Nothing
                                )
 discovery (ReqRep dat_) event bcast port = reqRepServer dat_ bcast port event 
