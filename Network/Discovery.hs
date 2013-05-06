@@ -90,7 +90,23 @@ discovery ::  Discovery                                   -- ^ discoverty
 discovery (OneWay interval dat_) event bcast port = onSocket bcast port $ 
                \a s -> bracket (forkIO $ oneWayServer dat_ interval s a)
                                (killThread)
-                               (const . forever $ recvFrom s 1024 >>= uncurry event)
+                               (\_ -> 
+                                  let go Nothing = do
+                                            (a,b) <- recvFrom s 1024 
+                                            event a b
+                                            _ <- sendTo s a b
+                                            threadDelay 100
+                                            go (Just a)
+                                      go (Just x) = do
+                                            (a,b) <- recvFrom s 1024
+                                            if x == a
+                                                then go Nothing
+                                                else do
+                                                  event a b
+                                                  _ <- sendTo s a b
+                                                  go (Just a)
+                                  in go Nothing
+                               )
 discovery (ReqRep dat_) event bcast port = reqRepServer dat_ bcast port event 
 
 -- | Searches for server for the given amount of time
@@ -117,7 +133,7 @@ oneWayServer getData interval sock addr = forever $
 reqRepServer :: (IO ByteString) -> DiscoveryHost -> Int -> (ByteString -> SockAddr -> IO ()) -> IO ()
 reqRepServer getData bcast port event = do
     _ <- forkIO $ onSocket bcast port $ \addr sock -> do
-        _ <- forkIO $ replicateM_  10 (getData >>= \d -> sendTo sock d addr >> delay 2)
+        _ <- forkIO $ replicateM_ 10 (getData >>= \d -> sendTo sock d addr >> delay 2)
         forever $ recvFrom sock 1024 >>= \(data_,addr') -> do 
            event data_ addr'
            bracket (do socket AF_INET Stream defaultProtocol)
@@ -133,15 +149,12 @@ reqRepServer getData bcast port event = do
             )
   where 
     sockHandler sock = do
-      (s, _) <- accept sock -- FIXMENOW 2nd 3rd param
+      (s, _) <- accept sock
       _ <- forkIO $ communicate s 
       sockHandler sock
     communicate s = do
       (data_, addr) <- recvFrom s 1024
       event data_ addr
-
-      
-            
 
 -- | run one way client
 oneWayClient :: Eq a 
